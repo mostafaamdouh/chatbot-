@@ -1,5 +1,17 @@
+# Web Framework 
 flask
 flask-cors
-groq
-python-dotenv
-gunicorn
+
+#  AI APIs 
+groq           # Primary LLM API (Groq - Llama 3.3 70B)
+requests       # OpenRouter fallback API (HTTP calls)
+
+#  RAG - Retrieval Augmented Generation 
+sentence-transformers   # Embedding model (paraphrase-multilingual-MiniLM-L12-v2)
+chromadb                # Vector database
+
+#  Environment & Config 
+python-dotenv  # .env file
+
+#  Production Server 
+gunicorn 
