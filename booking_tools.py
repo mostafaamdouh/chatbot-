@@ -4,6 +4,14 @@ from database import check_availability, create_booking, get_booking, cancel_boo
 
 # TOOL DEFINITIONS
 
+# This is the dictionary we send to the LLM so it knows about available tools.
+# The LLM reads the description and decides when to call each tool.
+# Each tool has:
+#   - name:        function name
+#   - description: explanation for the LLM about when to use it
+#   - parameters:  required data (JSON Schema)
+
+
 TOOLS = [
     {
         "type": "function",
@@ -124,61 +132,16 @@ TOOLS = [
 
 # TOOL EXECUTOR
 
-def _build_booking_card(result: dict, tool_args: dict) -> str:
-    """
-    Builds the [[BOOKING]] card string from a successful create_booking result.
-    This card is appended to the tool result so the LLM includes it in its reply.
-    The Flutter app reads this card to register the booking in Amplify.
-    """
-    studio_letter = tool_args.get("studio", "A").upper()
-    studio_name   = f"Studio {studio_letter}"
-    date          = tool_args.get("date", "")
-    hour          = int(tool_args.get("hour", 9))
-    duration      = int(tool_args.get("duration", 1))
-    client_name   = tool_args.get("client_name", "")
-    phone         = tool_args.get("phone", "")
-
-    if duration == 4:
-        duration_type = "half_day"
-        card = {
-            "studio":      studio_name,
-            "date":        date,
-            "startHour":   hour,
-            "duration":    duration_type,
-            "clientName":  client_name,
-            "clientPhone": phone,
-        }
-    elif duration >= 8:
-        duration_type = "full_day"
-        card = {
-            "studio":      studio_name,
-            "date":        date,
-            "startHour":   hour,
-            "duration":    duration_type,
-            "clientName":  client_name,
-            "clientPhone": phone,
-        }
-    else:
-        end_hour = hour + duration
-        card = {
-            "studio":      studio_name,
-            "date":        date,
-            "startHour":   hour,
-            "endHour":     end_hour,
-            "duration":    "hourly",
-            "clientName":  client_name,
-            "clientPhone": phone,
-        }
-
-    card_json = json.dumps(card, ensure_ascii=False)
-    return f"\n[[BOOKING]]{card_json}[[/BOOKING]]"
+# When the LLM decides to call a tool, it sends us:
+#   - tool_name:  function name
+#   - tool_args:  the data (JSON)
+# execute_tool runs the actual function and returns the result as JSON string
 
 
 def execute_tool(tool_name: str, tool_args: dict, session_id: str) -> str:
     """
     Executes the tool requested by the LLM and returns the result as JSON string.
-    For create_booking, appends a [[BOOKING]] card when booking succeeds so the
-    Flutter app can register the booking in Amplify.
+    session_id is needed only in create_booking to link the booking to the chat.
     """
     try:
         if tool_name == "check_availability":
@@ -187,7 +150,6 @@ def execute_tool(tool_name: str, tool_args: dict, session_id: str) -> str:
                 target_date=tool_args["date"],
                 duration=tool_args.get("duration", 1),
             )
-            return json.dumps(result, ensure_ascii=False)
 
         elif tool_name == "create_booking":
             result = create_booking(
@@ -199,23 +161,18 @@ def execute_tool(tool_name: str, tool_args: dict, session_id: str) -> str:
                 hour=tool_args["hour"],
                 duration=tool_args["duration"],
             )
-            result_str = json.dumps(result, ensure_ascii=False)
-            # Append the booking card so the LLM includes it in its reply
-            if result.get("success"):
-                result_str += _build_booking_card(result, tool_args)
-            return result_str
 
         elif tool_name == "get_booking":
             result = get_booking(booking_id=tool_args["booking_id"])
-            return json.dumps(result, ensure_ascii=False)
 
         elif tool_name == "cancel_booking":
             result = cancel_booking(booking_id=tool_args["booking_id"])
-            return json.dumps(result, ensure_ascii=False)
 
         else:
-            return json.dumps({"error": f"Unknown tool: {tool_name}"})
+            result = {"error": f"Unknown tool: {tool_name}"}
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        # If an error occurs during execution, return it to the LLM to explain to the client
+        result = {"error": str(e)}
 
+    return json.dumps(result, ensure_ascii=False)
