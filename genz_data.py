@@ -123,7 +123,7 @@ BOOKING POLICY
 - Advance booking required: at least 24 hours
 - Cancellation policy: free cancellation up to 12 hours before session
 - Deposit: 30% required to confirm booking
-- Bookings are handled automatically through the booking system — use the available tools.
+- To book, use the GENZ Studios app or call: New Cairo: 010-0000-0001 | Dokki: 010-0000-0002
 
 Reply in English only when customer writes in English.
 """
@@ -253,7 +253,7 @@ GENZ_STUDIOS_AR = """
 - الحجز المسبق: لازم قبل 24 ساعة على الأقل
 - الإلغاء: مجاني لو قبل 12 ساعة من الجلسة
 - العربون: 30% عشان يتأكد الحجز
-- الحجوزات بتتم أوتوماتيك عن طريق نظام الحجز — استخدم الأدوات المتاحة.
+- للحجز، استخدم تطبيق GENZ Studios أو اتصل: التجمع: 010-0000-0001 | الدقي: 010-0000-0002
 
 رد بالعربية فقط لو العميل بيتكلم عربي.
 """
