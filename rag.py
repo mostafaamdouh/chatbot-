@@ -174,11 +174,11 @@ CHUNKS = [
     # booking flow - خطوات الحجز
     {
         "id": "booking_flow_ar",
-        "text": "خطوات الحجز: اختار الاستوديو (A/B/C في التجمع أو D/E/F في الدقي) والتاريخ والمدة. وفّر اسمك الكامل ورقم تليفونك. هنتحقق من المواعيد المتاحة ونأكدلك الحجز برقم مرجعي. ممكن تلغي أو تستعلم عن حجزك برقم الحجز."
+        "text": "للحجز في GENZ Studios: اختار الاستوديو (A/B/C في التجمع أو D/E/F في الدقي) والتاريخ والمدة. للحجز استخدم تطبيق GENZ Studios أو اتصل بفرع التجمع على 010-0000-0001 أو فرع الدقي على 010-0000-0002."
     },
     {
         "id": "booking_flow_en",
-        "text": "Booking steps: Choose your studio (A/B/C in New Cairo or D/E/F in Dokki), date, and duration. Provide your full name and phone number. We will check available slots and confirm your booking with a reference ID. You can cancel or check your booking status using the booking ID."
+        "text": "To book at GENZ Studios: choose your studio (A/B/C in New Cairo or D/E/F in Dokki), date, and duration. To confirm your booking, use the GENZ Studios app or call New Cairo branch: 010-0000-0001 or Dokki branch: 010-0000-0002."
     },
 ]
 
