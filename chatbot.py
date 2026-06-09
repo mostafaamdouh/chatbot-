@@ -26,43 +26,38 @@ from genz_data import GENZ_STUDIOS_EN, GENZ_STUDIOS_AR
 from rag import search
 from booking_tools import TOOLS, execute_tool
 
-#  CONSTANTS 
-SESSION_TTL_DAYS   = 3    # Sessions expire after 3 days of inactivity
-MAX_MESSAGE_LENGTH = 500  # Maximum message length
-RATE_LIMIT         = 20   # Maximum messages per minute per session
+# ─────────────────────────────────────────────────────────────────────────────
+#  CONSTANTS
+# ─────────────────────────────────────────────────────────────────────────────
+SESSION_TTL_DAYS   = 3
+MAX_MESSAGE_LENGTH = 500
+RATE_LIMIT         = 20
 
-#  SESSIONS 
-# Each session stores:
-#   history:     Complete conversation history (user + assistant + tool messages)
-#   last_active: Last time the client was active (for TTL)
-#   timestamps:  Deque with timestamps from the last 60 seconds (for rate limiting)
+# ─────────────────────────────────────────────────────────────────────────────
+#  SESSIONS
+# ─────────────────────────────────────────────────────────────────────────────
 sessions = {}
 
 
-#  LANGUAGE DETECTION 
-ARABIC_RE  = re.compile(r"[\u0600-\u06FF]+")  # Regex for Arabic characters
-ENGLISH_RE = re.compile(r"[a-zA-Z]+")  # Regex for English characters
+# ─────────────────────────────────────────────────────────────────────────────
+#  LANGUAGE DETECTION
+# ─────────────────────────────────────────────────────────────────────────────
+ARABIC_RE  = re.compile(r"[\u0600-\u06FF]+")
+ENGLISH_RE = re.compile(r"[a-zA-Z]+")
 
 def detect_lang(text: str) -> str:
-    """
-    Determines the language of the message by percentage, not just by presence.
-    If 50%+ of characters are Arabic → ar, otherwise → en.
-    Numbers and symbols are ignored (they have no language).
-    """
     arabic_chars  = sum(len(m) for m in ARABIC_RE.findall(text))
     english_chars = sum(len(m) for m in ENGLISH_RE.findall(text))
     total = arabic_chars + english_chars
     if total == 0:
-        return "ar"  # default لو مفيش حروف (أرقام فقط مثلاً)
+        return "ar"
     return "ar" if (arabic_chars / total) >= 0.5 else "en"
 
 
-#  SESSION HELPERS 
+# ─────────────────────────────────────────────────────────────────────────────
+#  SESSION HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
 def cleanup_expired_sessions():
-    """
-    Deletes sessions that haven't been active for more than SESSION_TTL_DAYS.
-    Runs automatically with each request.
-    """
     cutoff  = datetime.now() - timedelta(days=SESSION_TTL_DAYS)
     expired = [sid for sid, data in sessions.items() if data["last_active"] < cutoff]
     for sid in expired:
@@ -72,27 +67,18 @@ def cleanup_expired_sessions():
 
 
 def is_rate_limited(session_id: str) -> bool:
-    """
-    Sliding window rate limiter.
-    Removes timestamps that are outside the 60-second window.
-    If message count >= RATE_LIMIT → blocked.
-    """
     now          = datetime.now()
     window_start = now - timedelta(seconds=60)
     timestamps   = sessions[session_id]["timestamps"]
-
     while timestamps and timestamps[0] < window_start:
         timestamps.popleft()
-
     if len(timestamps) >= RATE_LIMIT:
         return True
-
     timestamps.append(now)
     return False
 
 
 def validate_message(message: str, lang: str) -> str | None:
-    """Validates the message. Returns error string if there's a problem, otherwise None."""
     if not message:
         return "الرسالة فارغة." if lang == "ar" else "Message is empty."
     if len(message) > MAX_MESSAGE_LENGTH:
@@ -104,90 +90,73 @@ def validate_message(message: str, lang: str) -> str | None:
     return None
 
 
-#  SYSTEM PROMPT 
+# ─────────────────────────────────────────────────────────────────────────────
+#  SYSTEM PROMPT
+# ─────────────────────────────────────────────────────────────────────────────
+BOOKING_REDIRECT_EN = """
+BOOKING INSTRUCTIONS:
+- You can check studio availability when the client asks about free slots or timings.
+- You CANNOT create or cancel bookings in this chat.
+- If the client wants to make a booking, tell them:
+  "To book a studio, please use the GENZ Studios app or call us:
+   New Cairo branch: 010-0000-0001 | Dokki branch: 010-0000-0002"
+- Today's date is: {date} ({day}).
+"""
+
+BOOKING_REDIRECT_AR = """
+تعليمات الحجز:
+- تقدر تتحقق من مواعيد الاستوديوهات الفاضية لما العميل يسأل.
+- مش بتعمل حجوزات أو إلغاءات مباشرة في الشات ده.
+- لو العميل عايز يحجز، قوله:
+  "للحجز، استخدم تطبيق GENZ Studios أو اتصل بينا:
+   فرع التجمع: 010-0000-0001 | فرع الدقي: 010-0000-0002"
+- تاريخ النهارده: {date} ({day}).
+"""
+
 def system_prompt_for(lang: str, user_message: str) -> str:
-    """
-    Builds the system prompt from:
-    1. Complete company information (genz_data.py)
-    2. The most relevant chunks for the question (RAG from rag.py)
-    3. Booking instructions and tools (new)
-    """
     context = search(user_message)
-
-    # Additional booking instructions — explains to the LLM how to handle the tools
-    booking_instructions_en = """
-BOOKING ASSISTANT INSTRUCTIONS:
-- You have access to 4 booking tools: check_availability, create_booking, get_booking, cancel_booking.
-- When a client wants to book: first check availability, show options, collect name + phone, then confirm before creating.
-- Today's date is: """ + datetime.now().strftime("%Y-%m-%d") + """ (""" + datetime.now().strftime("%A") + """).
-- Always collect missing info step by step — don't ask for everything at once.
-- After a successful booking, clearly show the booking ID, date, time, studio, and total price.
-- Prices are in Egyptian Pounds (EGP).
-"""
-
-    booking_instructions_ar = """
-تعليمات نظام الحجز:
-- عندك 4 أدوات للحجز: check_availability, create_booking, get_booking, cancel_booking.
-- لما العميل يطلب حجز: اتحقق من المواعيد الأول، وريه الخيارات، اجمع الاسم والتليفون، تأكد منه، وبعدين عمل الحجز.
-- تاريخ النهارده: """ + datetime.now().strftime("%Y-%m-%d") + """ (""" + datetime.now().strftime("%A") + """).
-- اجمع المعلومات الناقصة خطوة خطوة — متسألش كل حاجة مرة واحدة.
-- بعد الحجز، وضّح رقم الحجز والتاريخ والوقت والاستوديو والسعر الكلي.
-- الأسعار بالجنيه المصري.
-"""
+    today   = datetime.now().strftime("%Y-%m-%d")
+    day     = datetime.now().strftime("%A")
 
     if lang == "ar":
         return (
             GENZ_STUDIOS_AR
-            + booking_instructions_ar
+            + BOOKING_REDIRECT_AR.format(date=today, day=day)
             + f"\n\nمعلومات ذات صلة بسؤال العميل:\n{context}"
         )
     return (
         GENZ_STUDIOS_EN
-        + booking_instructions_en
+        + BOOKING_REDIRECT_EN.format(date=today, day=day)
         + f"\n\nRelevant information for this question:\n{context}"
     )
 
 
-#  FUNCTION CALLING LOOP 
+# ─────────────────────────────────────────────────────────────────────────────
+#  FUNCTION CALLING LOOP
+#  Handles check_availability and get_booking tool calls from the LLM.
+#  Max 5 iterations to prevent infinite loops.
+# ─────────────────────────────────────────────────────────────────────────────
 def call_groq_with_tools(messages: list, session_id: str, lang: str) -> str:
-    """
-    Sends a request to Groq with tools and handles function calling.
+    loop_messages = list(messages)
 
-    Flow:
-    1. Sends messages + tools to the LLM
-    2. If the LLM decides to call a tool:
-       a. Execute the actual function
-       b. Add the result to messages as a tool message
-       c. Send back to the LLM to continue the response
-    3. If the LLM replies with regular text → return it
-
-    Why a loop instead of a single call?
-    Because the LLM can call multiple tools in the same conversation.
-    Example: check_availability → client agrees → create_booking
-    """
-    loop_messages = list(messages)  # Copy to avoid modifying the original
-
-    for _ in range(5):  # Max 5 tool calls to prevent infinite loop
+    for _ in range(5):
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=loop_messages,
             tools=TOOLS,
-            tool_choice="auto",  # Let the LLM decide when to call tools
+            tool_choice="auto",
             temperature=0.7,
             max_tokens=900,
         )
 
         message = response.choices[0].message
 
-        # If no tool call → the LLM replied with regular text, done
         if not message.tool_calls:
             return message.content
 
-        #  There are one or more tool calls 
-        # Add the LLM response (which contains tool_calls) to messages
         loop_messages.append({
-            "role": "assistant",
-            "content": message.content or "",
+            "role":       "assistant",
+            "content":    message.content or "",
             "tool_calls": [
                 {
                     "id":       tc.id,
@@ -201,25 +170,18 @@ def call_groq_with_tools(messages: list, session_id: str, lang: str) -> str:
             ],
         })
 
-        # Execute each tool and add its result
         for tc in message.tool_calls:
             tool_name = tc.function.name
             tool_args = json.loads(tc.function.arguments)
-
             print(f"[Tool Call] {tool_name}({tool_args})")
-
             result = execute_tool(tool_name, tool_args, session_id)
-
             print(f"[Tool Result] {result}")
-
             loop_messages.append({
                 "role":         "tool",
                 "tool_call_id": tc.id,
                 "content":      result,
             })
-        # The loop will repeat and send to the LLM again with tool results
 
-    # لو وصلنا لـ 5 loops من غير رد نهائي
     return (
         "عذراً، في مشكلة في معالجة طلبك. حاول تاني."
         if lang == "ar"
@@ -228,10 +190,6 @@ def call_groq_with_tools(messages: list, session_id: str, lang: str) -> str:
 
 
 def call_openrouter_with_tools(messages: list, session_id: str, lang: str) -> str:
-    """
-    Same logic exactly, but with OpenRouter as fallback.
-    OpenRouter supports the same tools format.
-    """
     loop_messages = list(messages)
 
     for _ in range(5):
@@ -267,11 +225,9 @@ def call_openrouter_with_tools(messages: list, session_id: str, lang: str) -> st
         for tc in message["tool_calls"]:
             tool_name = tc["function"]["name"]
             tool_args = json.loads(tc["function"]["arguments"])
-
             print(f"[Tool Call - OR] {tool_name}({tool_args})")
             result = execute_tool(tool_name, tool_args, session_id)
             print(f"[Tool Result - OR] {result}")
-
             loop_messages.append({
                 "role":         "tool",
                 "tool_call_id": tc["id"],
@@ -286,17 +242,14 @@ def call_openrouter_with_tools(messages: list, session_id: str, lang: str) -> st
 
 
 def get_ai_reply(messages: list, session_id: str, lang: str) -> str:
-    """Try Groq first, if it fails try OpenRouter, if both fail return error message."""
     try:
         return call_groq_with_tools(messages, session_id, lang)
     except Exception as e:
         print(f"[Groq failed] {e} — switching to OpenRouter...")
-
     try:
         return call_openrouter_with_tools(messages, session_id, lang)
     except Exception as e:
         print(f"[OpenRouter failed] {e}")
-
     return (
         "عذراً، في مشكلة تقنية دلوقتي. حاول تاني بعد شوية."
         if lang == "ar"
@@ -304,7 +257,9 @@ def get_ai_reply(messages: list, session_id: str, lang: str) -> str:
     )
 
 
-#  FLASK ROUTES 
+# ─────────────────────────────────────────────────────────────────────────────
+#  FLASK ROUTES
+# ─────────────────────────────────────────────────────────────────────────────
 @app.route("/")
 def home():
     return "GENZ Chatbot Server Running"
@@ -315,9 +270,9 @@ def chat():
     try:
         cleanup_expired_sessions()
 
-        data          = request.get_json(force=True)
-        user_message  = data.get("message", "").strip()
-        session_id    = data.get("session_id", "default")
+        data         = request.get_json(force=True)
+        user_message = data.get("message", "").strip()
+        session_id   = data.get("session_id", "default")
 
         if not user_message:
             return jsonify({"reply": ""}), 400
@@ -334,12 +289,10 @@ def chat():
 
         lang = detect_lang(user_message)
 
-        # Input validation
         error = validate_message(user_message, lang)
         if error:
             return jsonify({"reply": error}), 400
 
-        # Rate limiting
         if is_rate_limited(session_id):
             msg = (
                 "بتبعت رسايل كتير أوي! استنى دقيقة وحاول تاني."
@@ -356,8 +309,6 @@ def chat():
 
         bot_reply = get_ai_reply(messages, session_id, lang)
 
-        # Save only user + assistant in history
-        # We don't save tool messages because the system prompt is rebuilt from scratch each time
         history.append({"role": "user",      "content": user_message})
         history.append({"role": "assistant", "content": bot_reply})
 
@@ -385,30 +336,6 @@ def reset():
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "running"})
-
-
-#  ADMIN ENDPOINTS 
-# Additional endpoints for admin to view bookings
-from database import get_all_bookings
-
-@app.route("/bookings", methods=["GET"])
-def bookings():
-    """Returns all bookings. Can filter with ?status=confirmed or cancelled"""
-    status = request.args.get("status")
-    return jsonify(get_all_bookings(status=status))
-
-
-@app.route("/availability", methods=["GET"])
-def availability():
-    """
-    Checks available times for a studio on a given day.
-    Example: GET /availability?studio=A&date=2026-06-09&duration=2
-    """
-    from database import check_availability as db_check
-    studio   = request.args.get("studio", "A")
-    date     = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
-    duration = int(request.args.get("duration", 1))
-    return jsonify(db_check(studio, date, duration))
 
 
 if __name__ == "__main__":
